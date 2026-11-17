@@ -6,7 +6,7 @@ run the scripts yourself first. `demo_output/` holds the full, un-curated CSV
 outputs this sample is drawn from -- a completed demonstration run. The
 downloaded open-access PDFs from that same run aren't tracked here (~50 MB,
 example data only) -- they're attached as `demo_pdfs.zip` on the
-[latest GitHub release](https://github.com/nayeem-hossain/systematic-review-pipeline/releases/latest).
+[latest GitHub release](https://github.com/nayeem-hossain/slr-pipeline/releases/latest).
 
 The worked example domain is machine-learning / AI-based intrusion detection
 systems (ML-IDS) -- see the README's "Worked example" section for the full
