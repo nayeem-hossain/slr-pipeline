@@ -389,3 +389,58 @@ class TestCrossPhaseMerge:
         st, cfg = build_run(tmp_path, 1, [(0, 0, [])])
         merged = slr._merge_included_across_phases(st, cfg)
         assert merged.empty and "id" in merged.columns
+class TestCrossPhaseDuplicates:
+    """A record re-found by a later phase's search was already screened in
+    its first phase: the TUI never presents it again (decided_keys cache),
+    so its later-phase sheet row keeps a blank decision forever. Counting
+    must treat that row as what it is -- a duplicate removed before
+    screening -- not as a permanently undecided record, and the removal
+    belongs in duplicates_removed like any other duplicate."""
+
+    def _frame(self, rows):
+        return pd.DataFrame(rows)
+
+    def test_refound_decided_record_counts_as_duplicate_not_undecided(self):
+        p1 = PhaseFrames(
+            candidates=self._frame([{"id": i} for i in (1, 2, 3)]),
+            dedup=self._frame([{"id": i, "duplicate_of": None} for i in (1, 2, 3)]),
+            screening=self._frame([
+                {"id": 1, "doi": "10.1/a", "title": "Alpha", "ta_decision": "exclude"},
+                {"id": 2, "doi": "10.1/b", "title": "Beta", "ta_decision": "include"},
+                {"id": 3, "doi": "10.1/c", "title": "Gamma", "ta_decision": "exclude"},
+            ]),
+        )
+        p2 = PhaseFrames(
+            candidates=self._frame([{"id": i} for i in (1, 2)]),
+            dedup=self._frame([{"id": i, "duplicate_of": None} for i in (1, 2)]),
+            screening=self._frame([
+                {"id": 1, "doi": "10.1/b", "title": "Beta", "ta_decision": ""},
+                {"id": 2, "doi": "10.1/d", "title": "Delta", "ta_decision": "exclude"},
+            ]),
+        )
+        inc = self._frame([{"id": "p1_2", "doi": "10.1/b", "title": "Beta",
+                            "ft_decision": "include", "ft_reason": ""}])
+        counts = derive_prisma_counts_for_run([p1, p2], inc)
+        assert counts["identified"] == 5
+        assert counts["duplicates_removed"] == 1
+        assert counts["cross_phase_duplicates"] == 1
+        assert counts["screened"] == 4
+        assert counts["excluded_ta"] == 3
+        assert counts["assessed_ft"] == 1
+        assert counts["undecided_ta"] == 0
+        assert counts["included"] == 1
+        from srp.prisma import prisma_residuals
+        assert not any("no title/abstract decision" in w
+                       for w in prisma_residuals(counts))
+
+    def test_record_undecided_in_phase1_and_decided_in_phase2_is_not_a_duplicate(self):
+        cand = self._frame([{"id": 1}])
+        dd = self._frame([{"id": 1, "duplicate_of": None}])
+        p1 = PhaseFrames(cand, dd, self._frame([
+            {"id": 1, "doi": "10.1/e", "title": "Epsilon", "ta_decision": ""}]))
+        p2 = PhaseFrames(cand, dd, self._frame([
+            {"id": 1, "doi": "10.1/e", "title": "Epsilon", "ta_decision": "exclude"}]))
+        counts = derive_prisma_counts_for_run([p1, p2], self._frame([]))
+        assert counts["duplicates_removed"] == 0
+        assert counts["excluded_ta"] == 1
+        assert counts["screened"] == 2

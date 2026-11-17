@@ -130,6 +130,11 @@ def _has_content(value) -> bool:
 
 def dedup(df: pd.DataFrame, title_threshold: int = 92,
            min_length_ratio: float = MIN_LENGTH_RATIO) -> pd.DataFrame:
+    missing = [c for c in ("id", "doi", "title") if c not in df.columns]
+    if missing:
+        raise ValueError(
+            "candidates frame is missing required column(s): "
+            + ", ".join(missing) + f"; found: {list(df.columns)}")
     df = df.copy()
     df["doi_norm"] = df["doi"].apply(normalize_doi)
     df["title_norm"] = df["title"].fillna("").apply(normalize_title)
@@ -156,10 +161,13 @@ def dedup(df: pd.DataFrame, title_threshold: int = 92,
         if ri != rj:
             parent[rj] = ri
 
-    # dedup_method is recorded against whichever row a merge was actually
-    # detected FOR, describing the real comparison that caught it -- even if
-    # canonical selection later assigns duplicate_of to a different cluster
-    # member than the one it was directly compared against.
+    # dedup_method records, for BOTH rows of a comparison, the real comparison
+    # that caught the merge (first detection wins). Recording only the later
+    # row of each pair left the earlier row -- when it was not the canonical
+    # survivor -- with no detected method at all, and the final assignment
+    # then fell back to a hardcoded "doi_exact" label for merges no DOI
+    # comparison ever touched. Provenance must describe what actually
+    # happened, not a plausible-sounding default.
     method_of: dict[int, str] = {}
 
     # Pass 1: exact DOI match.
@@ -170,7 +178,8 @@ def dedup(df: pd.DataFrame, title_threshold: int = 92,
             continue
         if doi in seen_doi:
             union(seen_doi[doi], idx)
-            method_of[idx] = "doi_exact"
+            method_of.setdefault(seen_doi[doi], "doi_exact")
+            method_of.setdefault(idx, "doi_exact")
         else:
             seen_doi[doi] = idx
 
@@ -211,7 +220,8 @@ def dedup(df: pd.DataFrame, title_threshold: int = 92,
             # case and the one a reviewer may legitimately want to audit.
             kind = "fuzzy_title_crossdoi" if (doi_a and doi_b) else "fuzzy_title"
             union(a, b)
-            method_of[b] = f"{kind}_{score:.0f}"
+            method_of.setdefault(a, f"{kind}_{score:.0f}")
+            method_of.setdefault(b, f"{kind}_{score:.0f}")
 
     # Canonical selection, per cluster: has a DOI (citable) > has an abstract
     # (screenable without hunting down the full text) > first-seen. DOI-presence
@@ -237,7 +247,11 @@ def dedup(df: pd.DataFrame, title_threshold: int = 92,
             if idx == canonical:
                 continue
             df.at[idx, "duplicate_of"] = canonical_id
-            df.at[idx, "dedup_method"] = method_of.get(idx, "doi_exact")
+            # With both-side recording above, every clustered member carries
+            # the method of a comparison it actually took part in. This
+            # fallback is a last resort only, and it must stay honest: never
+            # claim a DOI match that did not happen.
+            df.at[idx, "dedup_method"] = method_of.get(idx, "cluster")
     return df
 
 
@@ -255,7 +269,10 @@ def main():
     args = ap.parse_args()
 
     df = pd.read_csv(args.inp, encoding="utf-8")
-    result = dedup(df, args.title_threshold, args.min_length_ratio)
+    try:
+        result = dedup(df, args.title_threshold, args.min_length_ratio)
+    except ValueError as e:
+        ap.error(str(e))
     n_dupes = result["duplicate_of"].notna().sum()
     print(f"{len(result)} records in, {n_dupes} flagged duplicate, "
           f"{len(result) - n_dupes} unique records remain for screening")

@@ -20,6 +20,7 @@ from dataclasses import dataclass
 import pandas as pd
 
 from srp.decisions import TA_PROCEED_DECISIONS
+from srp.normalize import record_key
 
 
 def _norm(series: pd.Series) -> pd.Series:
@@ -33,22 +34,50 @@ class PhaseFrames:
     screening: pd.DataFrame
 
 
+def _screening_keys(screening: pd.DataFrame) -> list[str]:
+    """Record key per screening row ('' when a row carries neither a DOI nor
+    a title to key on)."""
+    return [record_key(row.get("doi", ""), row.get("title", ""))
+            for _, row in screening.iterrows()]
+
+
 def derive_prisma_counts_for_run(phases: list[PhaseFrames],
                                   included_final: pd.DataFrame) -> dict:
     identified = duplicates_removed = screened = excluded_ta = assessed_ft = 0
     undecided_ta = 0
+    cross_phase_duplicates = 0
+    # Record keys that already carry a TA decision in an earlier phase. A
+    # later phase's search that re-finds such a record produces a fresh sheet
+    # row for it, but the TUI never presents it again (RunState.decided_keys
+    # is the cross-phase "already judged" cache), so that row's decision stays
+    # blank forever. It is a duplicate removed before screening -- exactly
+    # what PRISMA's duplicates box is for -- not an undecided record, and
+    # counting it as screened/undecided both overstates the screened total
+    # and leaves a residual warning no user action can ever clear.
+    decided_keys: set[str] = set()
     for p in phases:
         identified += len(p.candidates)
         if "duplicate_of" in p.dedup.columns:
             duplicates_removed += int(p.dedup["duplicate_of"].notna().sum())
         elif not p.candidates.empty and not p.dedup.empty:
             duplicates_removed += max(len(p.candidates) - len(p.dedup), 0)
-        screened += len(p.screening)
         if "ta_decision" in p.screening.columns:
             ta = _norm(p.screening["ta_decision"])
-            excluded_ta += int(ta.eq("exclude").sum())
-            undecided_ta += int(ta.eq("").sum())
-            assessed_ft += int(ta.isin(TA_PROCEED_DECISIONS).sum())
+            keys = _screening_keys(p.screening)
+            cross = [bool(k) and k in decided_keys for k in keys]
+            n_cross = int(sum(cross))
+            if n_cross:
+                cross_phase_duplicates += n_cross
+                duplicates_removed += n_cross
+            keep = [not c for c in cross]
+            screened += int(sum(keep))
+            kept_ta = ta[keep]
+            excluded_ta += int(kept_ta.eq("exclude").sum())
+            undecided_ta += int(kept_ta.eq("").sum())
+            assessed_ft += int(kept_ta.isin(TA_PROCEED_DECISIONS).sum())
+            decided_keys |= {k for k, d in zip(keys, ta) if k and d}
+        else:
+            screened += len(p.screening)
 
     excluded_ft = included = undecided_ft = 0
     ft_reasons: Counter = Counter()
@@ -73,6 +102,7 @@ def derive_prisma_counts_for_run(phases: list[PhaseFrames],
         "included": included,
         "undecided_ta": undecided_ta,
         "undecided_ft": undecided_ft,
+        "cross_phase_duplicates": cross_phase_duplicates,
         "ft_reasons": dict(ft_reasons),
     }
 
