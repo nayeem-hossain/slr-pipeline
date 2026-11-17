@@ -1,6 +1,6 @@
 [project]
 name = "systematic-review-pipeline"
-version = "1.2.4"
+version = "1.3.0"
 description = "A guided, auditable systematic-literature-review pipeline: search, dedup, screen, extract, appraise, and report against PRISMA 2020."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -22,8 +22,8 @@ dev = ["pytest>=7.0", "fastapi>=0.110.0", "uvicorn>=0.28.0", "httpx>=0.27.0", "c
 web = ["fastapi>=0.110.0", "uvicorn>=0.28.0", "httpx>=0.27.0", "cryptography>=41.0.0", "psycopg2-binary>=2.9.0"]
 
 [project.urls]
-Repository = "https://github.com/nayeem-hossain/systematic-review-pipeline"
-Changelog = "https://github.com/nayeem-hossain/systematic-review-pipeline/blob/main/CHANGELOG.md"
+Repository = "https://github.com/nayeem-hossain/slr-pipeline"
+Changelog = "https://github.com/nayeem-hossain/slr-pipeline/blob/main/CHANGELOG.md"
 
 # `slr` launches the same guided TUI as `python slr.py` -- installing it via
 # pip/pipx is a convenience for finding and updating the tool, not a reason to

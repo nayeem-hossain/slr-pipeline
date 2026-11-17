@@ -31,21 +31,44 @@ convenient for wiring into a pre-submission check.
 #   (endpoint URLs, pagination, parsing, rate-limit handling, plot geometry).
 # ===========================================================================
 import argparse
+import os
 import sys
 import time
+from pathlib import Path
+from urllib.parse import quote
 
 import pandas as pd
 import requests
 from rapidfuzz import fuzz
 
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from srp.normalize import normalize_doi  # noqa: E402
+
 TITLE_MATCH_THRESHOLD = 85
 
 
 # --- API internals: leave unless the API changes ---
+def _crossref_headers() -> dict:
+    """Crossref's polite pool asks API clients to identify themselves with a
+    contact mailto in the User-Agent. The address comes from the same MAILTO
+    environment variable the rest of the pipeline is configured with."""
+    mailto = os.environ.get("MAILTO", "").strip()
+    ua = "systematic-review-pipeline verify_citations"
+    if mailto:
+        ua += f" (mailto:{mailto})"
+    return {"User-Agent": ua}
+
+
 def crossref_lookup(doi: str) -> tuple[bool, str, str]:
-    """Returns (resolved, real_title, real_authors_str)."""
+    """Returns (resolved, real_title, real_authors_str).
+
+    The DOI is URL-encoded before it enters the request path: DOIs may
+    contain characters ('#', '?', spaces) that would otherwise truncate or
+    corrupt the URL and turn a real citation into a 404.
+    """
+    url = "https://api.crossref.org/works/" + quote(doi, safe="/")
     try:
-        r = requests.get(f"https://api.crossref.org/works/{doi}", timeout=20)
+        r = requests.get(url, headers=_crossref_headers(), timeout=20)
     except requests.RequestException as e:
         return False, "", f"request error: {e}"
     if r.status_code != 200:
@@ -65,7 +88,12 @@ def crossref_lookup(doi: str) -> tuple[bool, str, str]:
 
 
 def verify_one(doi: str, claimed_title: str) -> dict:
-    doi = (doi or "").strip()
+    # DOIs arrive in whatever form they were copied in -- bare, "doi:...", or
+    # a full doi.org URL. normalize_doi (the pipeline's single shared
+    # implementation, also used by dedup and screening) reduces them to the
+    # bare form; an un-normalized URL form 404s at Crossref and a genuine
+    # citation gets branded fabricated.
+    doi = normalize_doi(doi or "")
     claimed_title = (claimed_title or "").strip()
     if not doi:
         return {"doi": doi, "claimed_title": claimed_title, "status": "SKIP",
@@ -77,7 +105,11 @@ def verify_one(doi: str, claimed_title: str) -> dict:
                 "detail": f"DOI does not resolve on Crossref ({real_authors}) "
                           f"-- likely fabricated or mistyped", "title_score": ""}
 
-    score = round(fuzz.token_set_ratio(claimed_title.lower(), real_title.lower()), 1) if claimed_title else 0
+    # token_sort_ratio, not token_set_ratio: token_set scores a claimed title
+    # that is merely a subset of the real title at 100 -- the same failure
+    # mode dedup.py rejects token_set for. A guard against inflated citation
+    # claims must not wave a truncated title through as a perfect match.
+    score = round(fuzz.token_sort_ratio(claimed_title.lower(), real_title.lower()), 1) if claimed_title else 0
     ok = score >= TITLE_MATCH_THRESHOLD
     return {"doi": doi, "claimed_title": claimed_title, "status": "PASS" if ok else "FAIL",
             "detail": f'resolves to "{real_title}" (authors: {real_authors})',

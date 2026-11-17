@@ -19,7 +19,10 @@ well-defined formula.
 """
 from __future__ import annotations
 
+from collections import Counter
 from dataclasses import dataclass, field
+
+from srp.normalize import record_key
 
 # Cohen (1960); the Landis & Koch (1977) bands are the convention reviewers expect
 # to see named in a methods section.
@@ -130,26 +133,65 @@ def _clean_cell(v) -> str:
     return "" if s == "nan" else s
 
 
+def _comparison_key(rid, row) -> str:
+    """The identity a reviewer row is matched on: its record key (normalized
+    DOI, else normalized title) when the row carries one, else the mapping key
+    it arrived under. The positional `id` cannot be trusted across two sheets:
+    ids are renumbered per run (see srp/normalize.py), so the same study can
+    sit under different ids in two reviewers' exports, and the same id can
+    hold different studies."""
+    rk = record_key(row.get("doi", ""), row.get("title", ""))
+    return rk if rk else str(rid)
+
+
+def _keyed_rows(rows: dict) -> dict:
+    """Index a {record_id: row} mapping by match key: the record key when it
+    is unique within this mapping, else the row's own mapping key. A record
+    key shared by several rows of one sheet identifies none of them --
+    matching on it would silently drop every row but one from the
+    comparison, so those rows fall back to their sheet ids instead."""
+    keys = {rid: _comparison_key(rid, row) for rid, row in rows.items()}
+    counts = Counter(keys.values())
+    return {
+        (key if counts[key] == 1 else str(rid)): (rid, row)
+        for rid, row in rows.items()
+        for key in (keys[rid],)
+    }
+
+
 def compare_reviewers(rows_a: dict, rows_b: dict, stage_col: str = "ta_decision") -> AgreementResult:
     """Compare two {record_id: row} mappings on one decision column.
 
     Only records BOTH reviewers decided are compared -- that is what kappa is
     defined over. Records only one of them touched are not disagreements, they are
     missing data, and folding them in would silently deflate the statistic.
+
+    Records are matched across the two mappings by record key (DOI/title)
+    whenever a row carries one, falling back to the mapping key only for rows
+    with neither -- matching on the raw mapping key alone would compare
+    different studies whenever the two sheets renumbered their ids, and miss
+    the same study whenever they renumbered differently.
     """
-    shared = [rid for rid in rows_a if rid in rows_b]
+    a_by_key = _keyed_rows(rows_a)
+    b_by_key = {key: row for key, (_, row) in _keyed_rows(rows_b).items()}
+    shared = [key for key in a_by_key if key in b_by_key]
     pairs = []
     conflicts = []
-    for rid in shared:
-        a = _clean_cell(rows_a[rid].get(stage_col, ""))
-        b = _clean_cell(rows_b[rid].get(stage_col, ""))
+    for key in shared:
+        rid_a, row_a = a_by_key[key]
+        row_b = b_by_key[key]
+        a = _clean_cell(row_a.get(stage_col, ""))
+        b = _clean_cell(row_b.get(stage_col, ""))
         if not a or not b:
             continue
         pairs.append((a, b))
         if a != b:
+            # The conflict is reported under reviewer A's own record id: that
+            # is the sheet a human reconciles against, whatever key the two
+            # sheets were matched on.
             conflicts.append({
-                "id": rid,
-                "title": rows_a[rid].get("title", ""),
+                "id": rid_a,
+                "title": row_a.get("title", ""),
                 "reviewer_a": a,
                 "reviewer_b": b,
             })

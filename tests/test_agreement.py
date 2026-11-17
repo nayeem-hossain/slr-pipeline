@@ -111,3 +111,34 @@ class TestCompareReviewers:
         a = {"1": {"ta_decision": "include"}, "2": {"ta_decision": "exclude"}}
         b = {"1": {"ta_decision": "include"}, "2": {"ta_decision": "exclude"}}
         assert "kappa" in compare_reviewers(a, b).summary()
+class TestCompareReviewersRecordKey:
+    """Two reviewers rarely screen byte-identical exports: ids are positional
+    and renumbered per run (see srp/normalize.py), so matching sheets on id
+    alone can compare different studies -- or miss the same study entirely.
+    Rows carrying a DOI/title are matched on the record key instead."""
+
+    def test_same_study_different_ids_compared_by_doi(self):
+        a = {1: {"ta_decision": "include", "doi": "10.1/x", "title": "Some Study"}}
+        b = {7: {"ta_decision": "exclude", "doi": "https://doi.org/10.1/X",
+                 "title": "Some Study"}}
+        r = compare_reviewers(a, b)
+        assert r.n_compared == 1
+        assert len(r.conflicts) == 1
+
+    def test_same_id_different_studies_not_compared(self):
+        a = {1: {"ta_decision": "include", "doi": "10.1/a", "title": "Study A"}}
+        b = {1: {"ta_decision": "include", "doi": "10.1/b", "title": "Study B"}}
+        r = compare_reviewers(a, b)
+        assert r.n_compared == 0
+    def test_shared_title_within_one_sheet_falls_back_to_ids(self):
+        """A record key shared by several rows of one sheet identifies none
+        of them. Those rows must still be compared (by their sheet ids),
+        never silently dropped from the comparison."""
+        a = {1: {"ta_decision": "include", "title": "Same Title"},
+             2: {"ta_decision": "exclude", "title": "Same Title"}}
+        b = {1: {"ta_decision": "include", "title": "Same Title"},
+             2: {"ta_decision": "include", "title": "Same Title"}}
+        r = compare_reviewers(a, b)
+        assert r.n_compared == 2
+        assert len(r.conflicts) == 1
+        assert r.conflicts[0]["id"] == 2

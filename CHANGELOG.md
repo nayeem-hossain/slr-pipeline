@@ -6,6 +6,45 @@ All notable changes to this project are documented here. Format follows
 
 ## [Unreleased]
 
+## [1.3.0] - 2026-11-17
+
+### Fixed
+
+- `verify_citations.py` sent each DOI to Crossref exactly as it appeared in
+  the input, so a DOI copied in doi.org-URL form 404'd and a genuine citation
+  was reported as likely fabricated. DOIs are now normalized through the
+  pipeline's shared `srp.normalize` before lookup, URL-encoded into the
+  request path, and sent with a mailto User-Agent for Crossref's polite
+  pool. The title check now uses `token_sort_ratio`: a claimed title that is
+  merely a subset of the real title no longer scores a perfect 100.
+- `dedup.py` recorded the merge method only against the later row of each
+  compared pair; the earlier row, when it was not the canonical survivor,
+  was labelled `doi_exact` even when no DOI comparison had touched it. The
+  detected method is now recorded for both rows of a pair, the fallback
+  label no longer claims a DOI match that never happened, and a candidates
+  file missing a required column (`id`, `doi`, `title`) fails with a clear
+  message instead of a `KeyError`.
+- `srp/agreement.py` matched two reviewers' sheets on the positional record
+  id, which is renumbered per run -- the same study could be missed and
+  different studies compared. Rows are now matched on the record key
+  (normalized DOI, else normalized title), falling back to the sheet id only
+  for rows with neither; conflicts are still reported under reviewer A's
+  own record id for reconciliation.
+- `srp/prisma.py` counted a record re-found by a later phase's search --
+  after an earlier phase had already decided it -- as screened and
+  permanently undecided, because the guided workflow never presents it for
+  screening again. Such records are now counted as duplicates removed
+  before screening (reported separately as `cross_phase_duplicates`), so
+  the PRISMA flow balances for multi-phase runs.
+
+### Changed
+
+- The GitHub repository was renamed to `slr-pipeline`; the project URLs in
+  `pyproject.toml` and the README's install and release links point at the
+  new address (the old one redirects). The distribution name is unchanged,
+  so existing pip/pipx installs upgrade in place.
+
+
 ## [1.2.4] - 2026-08-13
 
 ### Fixed

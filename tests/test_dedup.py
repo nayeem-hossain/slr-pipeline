@@ -274,3 +274,49 @@ class TestDedupEdgeCases:
         df = pd.DataFrame([{"id": 1, "title": "T", "doi": "10.1/a", "year": 2021},
                             {"id": 2, "title": "T", "doi": "10.1/b", "year": 2021}])
         assert len(dedup(df)) == 2
+class TestDedupMethodLabel:
+    def test_first_seen_member_of_a_fuzzy_pair_keeps_the_fuzzy_label(self):
+        """The merge method used to be recorded only against the later row of
+        a compared pair. The earlier row, when it was not the canonical
+        survivor, fell back to a hardcoded 'doi_exact' label even though no
+        DOI comparison ever touched it. Provenance that invents a DOI match
+        is worse than no provenance."""
+        df = make_candidates([
+            (1, "Deep Learning for Intrusion Detection in IoT Networks",
+             "Alpha, Ann", "", 2024),
+            (2, "Deep Learning for Intrusion Detection in IoT Network",
+             "Alpha, Ann", "", 2024),
+        ])
+        df.loc[df["id"] == 1, "abstract"] = ""  # only record 2 is screenable
+        out = dedup(df)
+        row1 = out[out["id"] == 1].iloc[0]
+        assert row1["duplicate_of"] == 2  # record 2 survives: it has the abstract
+        assert str(row1["dedup_method"]).startswith("fuzzy_title")
+
+
+class TestDedupInputValidation:
+    def test_missing_doi_column_is_a_clear_error(self):
+        df = make_candidates([(1, "Some Title", "Alpha, Ann", "10.1/a", 2024)])
+        df = df.drop(columns=["doi"])
+        with pytest.raises(ValueError, match="doi"):
+            dedup(df)
+
+
+class TestDedupMain:
+    def test_bom_encoded_csv_is_read(self, tmp_path, monkeypatch):
+        """Excel and several reference managers save CSVs with a UTF-8 BOM;
+        read as plain utf-8, the first column arrives as '\\ufeffid' and the
+        run dies on a KeyError far from the real cause."""
+        import sys
+        src = tmp_path / "candidates.csv"
+        df = make_candidates([(1, "Some Title", "Alpha, Ann", "10.1/a", 2024)])
+        src.write_bytes(b"\xef\xbb\xbf" + df.to_csv(index=False).encode("utf-8"))
+        out_path = tmp_path / "out.csv"
+        monkeypatch.setattr(
+            "sys.argv",
+            ["dedup.py", "--in", str(src), "--out", str(out_path)],
+        )
+        sys.modules["dedup"].main()
+        result = pd.read_csv(out_path)
+        assert list(result.columns)[0] == "id"
+        assert len(result) == 1

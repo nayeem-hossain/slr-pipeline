@@ -38,7 +38,7 @@ python -m pipx ensurepath
 Then install and run the tool itself:
 
 ```bash
-pipx install git+https://github.com/nayeem-hossain/systematic-review-pipeline.git
+pipx install git+https://github.com/nayeem-hossain/slr-pipeline.git
 slr
 ```
 
@@ -147,7 +147,7 @@ the full command sequence.
 
 ```bash
 git clone <this-repo-url>
-cd systematic-review-pipeline
+cd slr-pipeline
 
 python -m venv .venv
 source .venv/bin/activate            # Windows: .venv\Scripts\activate
@@ -210,7 +210,7 @@ log, citation verification). The open-access PDFs that `scripts/download.py`
 fetched for that same run aren't tracked in git (12 PDFs, ~50 MB -- every
 `pipx`/`pip install git+...` would otherwise re-download them for no reason,
 since they're example data, not part of the installed tool); they're attached
-to the [latest GitHub release](https://github.com/nayeem-hossain/systematic-review-pipeline/releases/latest)
+to the [latest GitHub release](https://github.com/nayeem-hossain/slr-pipeline/releases/latest)
 as `demo_pdfs.zip` instead. `examples/` additionally keeps a small curated
 sample of each output -- including a fully-decided screening sheet, a
 filled-in extraction/quality-scoring sheet, and the figures `scripts/figures.py`
@@ -238,7 +238,7 @@ and don't need touching for a normal review either.
 ## Repository layout
 
 ```
-systematic-review-pipeline/
+slr-pipeline/
 ├── slr.py                  # guided interactive entry point (run this)
 ├── srp/                     # importable library
 │   ├── config.py             # ReviewConfig (secrets are never persisted)
